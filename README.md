@@ -1,2 +1,0 @@
-# ReactCodeGenerator
- Utility to generate 

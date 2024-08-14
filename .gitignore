@@ -1,0 +1,5 @@
+
+/ReactCodeGenerator/.vs
+*.dll
+/ReactCodeGenerator/bin
+/ReactCodeGenerator/obj
