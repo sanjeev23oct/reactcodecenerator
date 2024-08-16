@@ -73,8 +73,56 @@ class Program
             _ => "any",
         };
     }
+    public static void GenerateApiFile(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
+    {
+        StringBuilder sb = new StringBuilder();
 
-    static void GenerateApiFile(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
+        // Define imports
+        sb.AppendLine($"import {{ {componentName}Request, {componentName}Response }} from '../../types/{componentName.ToLower()}.types';");
+        sb.AppendLine("import fetchClient from '../fetchClient';");
+        sb.AppendLine($"import {{ serialize{componentName} }} from './{componentName.ToLower()}.serializer';");
+        sb.AppendLine();
+
+        foreach (var path in openApiDocument.Paths)
+        {
+            // Check if the path contains the typeNameFilter
+            if (path.Key.Contains(typeNameFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var operation in path.Value.Operations)
+                {
+                    var methodName = $"{operation.Key.ToString().ToLower()}{componentName}";
+                    var returnType = $"{componentName}Response[]";
+                    var payloadType = $"{componentName}Request[]";
+                    var url = path.Key;
+
+                    if (operation.Key == OperationType.Get)
+                    {
+                        // GET method
+                        sb.AppendLine($"export const fetch{componentName} = async (): Promise<{returnType}> => {{");
+                        sb.AppendLine($"  const response = await fetchClient.get<any>(`{url}`);");
+                        sb.AppendLine($"  return serialize{componentName}(response);");
+                        sb.AppendLine("};");
+                        sb.AppendLine();
+                    }
+                    else if (operation.Key == OperationType.Post)
+                    {
+                        // POST method
+                        sb.AppendLine($"export const set{componentName} = async (payload: {payloadType}): Promise<{returnType}> => {{");
+                        sb.AppendLine($"  return await fetchClient.post<{returnType}>(`{url}`, payload);");
+                        sb.AppendLine("};");
+                        sb.AppendLine();
+                    }
+                    // You can add more method types (PUT, DELETE) here if needed.
+                }
+            }
+        }
+
+        // Write to file
+        var fileName = $"{componentName.ToLower()}.api.ts";
+        //var fullPath = Path.Combine(outputPath, fileName);
+        File.WriteAllText(fileName, sb.ToString());
+    }
+    static void GenerateApiFile2(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"import {{ {componentName} }} from '../../types/{componentName}.types';");
