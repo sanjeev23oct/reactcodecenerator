@@ -33,11 +33,11 @@ Before using this utility, ensure you have the following:
 3. **Run the Utility**  
    Execute the following command, replacing `path\to\swagger.json` with the path to your OpenAPI specification file and `ComponentName` with the desired component name:
    ```bash
-   ReactCodeGenerator.exe "path\to\swagger.json" "ComponentName"
+   ReactCodeGenerator.exe "path\to\swagger.json" "ComponentName" "typename" 
    ```
    **Example**:
    ```bash
-   ReactCodeGenerator.exe "C:\Users\YourName\Documents\swagger.json" "IPConfiguration"
+   ReactCodeGenerator.exe "D:\rssb\repos\openapi.json" location location
    ```
 
 ### Step 3: Generated Files
