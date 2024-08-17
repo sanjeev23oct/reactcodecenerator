@@ -13,11 +13,11 @@ class Program
             return;
         }
 
-        string openApiSpecPath = args[0];
+        string openApiSpecUrl = args[0];
         string componentName = args[1];
         string typeNameFilter = args.Length > 2 ? args[2] : null;
 
-        var openApiDocument = await LoadOpenApiDocument(openApiSpecPath);
+        var openApiDocument = await LoadOpenApiDocumentFromUrl(openApiSpecUrl);
 
         if (openApiDocument != null)
         {
@@ -38,8 +38,27 @@ class Program
             return document.OpenApiDocument;
         }
     }
+    private static async Task<OpenApiDocument> LoadOpenApiDocumentFromUrl(string url)
+    {
+        using var httpClient = new HttpClient();
+        var response = await httpClient.GetAsync(url);
 
-    static void GenerateTypesFile(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"Failed to fetch the OpenAPI document. Status Code: {response.StatusCode}");
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync();
+        var openApiDocument = new OpenApiStreamReader().Read(stream, out var diagnostic);
+
+        if (diagnostic.Errors.Count > 0)
+        {
+            throw new Exception($"Failed to parse the OpenAPI document. Errors: {string.Join(", ", diagnostic.Errors)}");
+        }
+
+        return openApiDocument;
+    }
+    static void GenerateTypesFileOld(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"export interface {componentName} {{");
@@ -62,6 +81,81 @@ class Program
         File.WriteAllText($"{componentName}.types.ts", sb.ToString());
     }
 
+    static string MapOpenApiTypeToTypeScript2(string openApiType, string format)
+    {
+        return openApiType switch
+        {
+            "string" => format == "date-time" ? "Date" : "string",
+            "integer" => "number",
+            "boolean" => "boolean",
+            "array" => "any[]",
+            _ => "any",
+        };
+    }
+
+    static void GenerateTypesFile(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var schema in openApiDocument.Components.Schemas)
+        {
+            if (typeNameFilter != null && !schema.Key.Equals(typeNameFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var typeDefinition = GenerateType(schema.Value, schema.Key, openApiDocument.Components.Schemas);
+            sb.Append(typeDefinition);
+        }
+
+        File.WriteAllText($"{componentName}.types.ts", sb.ToString());
+    }
+
+    static string GenerateType(OpenApiSchema schema, string typeName, IDictionary<string, OpenApiSchema> components)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"export interface {typeName} {{");
+
+        foreach (var property in schema.Properties)
+        {
+            var propertyName = property.Key;
+            var propertySchema = property.Value;
+
+            if (propertySchema.Reference != null)
+            {
+                // Handle references (e.g., nested objects)
+                var refTypeName = propertySchema.Reference.Id;
+                if (components.ContainsKey(refTypeName))
+                {
+                    var nestedType = GenerateType(components[refTypeName], refTypeName, components);
+                    sb.Insert(0, nestedType); // Insert nested type at the beginning
+                }
+                sb.AppendLine($"    {propertyName}: {refTypeName};");
+            }
+            else if (propertySchema.Type == "array" && propertySchema.Items.Reference != null)
+            {
+                // Handle arrays of references
+                var refTypeName = propertySchema.Items.Reference.Id;
+                if (components.ContainsKey(refTypeName))
+                {
+                    var nestedType = GenerateType(components[refTypeName], refTypeName, components);
+                    sb.Insert(0, nestedType); // Insert nested type at the beginning
+                }
+                sb.AppendLine($"    {propertyName}: {refTypeName}[];");
+            }
+            else
+            {
+                // Handle primitive types
+                var tsType = MapOpenApiTypeToTypeScript(propertySchema.Type, propertySchema.Format);
+                sb.AppendLine($"    {propertyName}: {tsType};");
+            }
+        }
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
     static string MapOpenApiTypeToTypeScript(string openApiType, string format)
     {
         return openApiType switch
@@ -73,6 +167,7 @@ class Program
             _ => "any",
         };
     }
+
     public static void GenerateApiFile(OpenApiDocument openApiDocument, string componentName, string typeNameFilter)
     {
         StringBuilder sb = new StringBuilder();

@@ -2,7 +2,7 @@
   "profiles": {
     "ReactCodeGenerator": {
       "commandName": "Project",
-      "commandLineArgs": "\"D:\\rssb\\repos\\openapi.json\" location location\r\n"
+      "commandLineArgs": "\"https://petstore.swagger.io/v2/swagger.json\" pet pet\r\n"
     }
   }
 }
