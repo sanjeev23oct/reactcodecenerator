@@ -28,7 +28,7 @@ public static class Program
             //GenerateTypesFile(openApiDocument, componentName, typeNameFilter);
             GenerateApiFileNew(openApiDocument, endPoint, componentName, basePath);
             GenerateSliceFile(openApiDocument, endPoint, componentName, basePath);
-            //GenerateSagaFile(componentName);
+            GenerateSagaFile(openApiDocument, endPoint, componentName, basePath);
             //GenerateContainerAndContentFiles(componentName);
         }
     }
@@ -955,15 +955,7 @@ public static class Program
         File.WriteAllText(outputPath, sb.ToString());
     }
 
-    // Helper method to capitalize the first character of a string
-    static string CapitalizeFirstChar(string input)
-    {
-        if (string.IsNullOrEmpty(input))
-            return input;
-
-        return char.ToUpper(input[0]) + input.Substring(1);
-    }
-
+   
 
 
 
@@ -1032,6 +1024,129 @@ public static class Program
 
         File.WriteAllText($"{componentName}Slice.ts", sb.ToString());
     }
+    static void GenerateSagaFile(OpenApiDocument openApiDocument, string endpointPath, string componentName, string basePath)
+    {
+        var sb = new StringBuilder();
+        var usedTypes = new HashSet<string>();  // Track which types are actually used
+        var methodNames = new List<string>();   // Track method names to generate saga watchers
+        var sliceActions = new List<string>();  // Track slice actions to import
+        var apiImports = new List<string>();    // Track API method imports
+
+        // Filter paths based on the input endpointPath parameter
+        var filteredPaths = openApiDocument.Paths
+            .Where(p => p.Key.Contains(endpointPath, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(p => p.Key, p => p.Value);
+
+        foreach (var path in filteredPaths)
+        {
+            foreach (var operation in path.Value.Operations)
+            {
+                string methodName;
+                if (!string.IsNullOrEmpty(operation.Value.OperationId))
+                {
+                    methodName = operation.Value.OperationId;
+                }
+                else
+                {
+                    methodName = $"{string.Join("", path.Key.Split('/').Select(s => CapitalizeFirstChar(s)))}";
+                }
+
+                methodName = char.ToLowerInvariant(methodName[0]) + methodName.Substring(1);
+                methodName = methodName.Replace("{", "").Replace("}", "");
+
+                // Add method name for saga watcher
+                methodNames.Add(methodName);
+
+                // Add slice actions
+                sliceActions.Add($"{methodName}Requested");
+                sliceActions.Add($"{methodName}Succeeded");
+                sliceActions.Add($"{methodName}Failed");
+
+                // Add API method import
+                apiImports.Add(methodName);
+
+                // Determine response and request types
+                string responseType = $"{componentName}";
+                string payloadType = "void";  // Default to void if no payload is needed
+
+                if (operation.Key == OperationType.Post || operation.Key == OperationType.Put || operation.Key == OperationType.Patch)
+                {
+                    foreach (var content in operation.Value.RequestBody?.Content)
+                    {
+                        if (content.Value.Schema?.Reference != null)
+                        {
+                            payloadType = content.Value.Schema.Reference.Id;
+                            usedTypes.Add(payloadType);
+                        }
+                    }
+                }
+
+                foreach (var response in operation.Value.Responses)
+                {
+                    foreach (var content in response.Value.Content)
+                    {
+                        if (content.Value.Schema?.Reference != null)
+                        {
+                            responseType = content.Value.Schema.Reference.Id;
+                            usedTypes.Add(responseType);
+                        }
+                    }
+                }
+
+                // Generate saga function for each operation
+                sb.AppendLine($"function* waitFor{CapitalizeFirstChar(methodName)}() {{");
+                sb.AppendLine($"  yield takeLatest({methodName}Requested, function* ({{ payload }}: PayloadAction<{payloadType}>) {{");
+                sb.AppendLine("    try {");
+                sb.AppendLine($"      const data: {responseType} = yield call({methodName}, payload);");
+                sb.AppendLine($"      yield put({methodName}Succeeded(data));");
+                sb.AppendLine("    } catch (e) {");
+                sb.AppendLine("      const error = e as unknown as Error;");
+                sb.AppendLine($"      yield put({methodName}Failed(error.message));");
+                sb.AppendLine("    }");
+                sb.AppendLine("  }});");
+                sb.AppendLine("}");
+                sb.AppendLine();
+            }
+        }
+
+        // Add imports for slice actions and API functions
+        sb.Insert(0, $"import {{ {string.Join(", ", sliceActions)} }} from '../slices/{componentName}Slice';\n");
+        sb.Insert(0, $"import {{ {string.Join(", ", apiImports)} }} from '../api/{componentName}.api';\n");
+        sb.Insert(0, "import { all, call, put, takeLatest } from 'redux-saga/effects';\n");
+
+        if (usedTypes.Count > 0)
+        {
+            var importLine = $"import {{ {string.Join(", ", usedTypes)} }} from '../types/{componentName}.types';";
+            sb.Insert(0, importLine + Environment.NewLine);
+        }
+
+        // Add the saga watcher functions
+        sb.AppendLine("function* saga() {");
+        sb.AppendLine("  yield all([");
+        foreach (var method in methodNames)
+        {
+            sb.AppendLine($"    call(waitFor{CapitalizeFirstChar(method)}),");
+        }
+        sb.AppendLine("  ]);");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("export default saga;");
+
+        // Write the generated saga file to a file
+        var outputPath = Path.Combine(basePath, "sagas", $"{componentName}.saga.ts");
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
+        File.WriteAllText(outputPath, sb.ToString());
+    }
+
+    // Helper method to capitalize the first character of a string
+    static string CapitalizeFirstChar(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+
+        return char.ToUpper(input[0]) + input.Substring(1);
+    }
+
 
     static void GenerateSagaFile(string componentName)
     {
